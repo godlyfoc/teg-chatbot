@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# Environment files (contain API keys)
+.env
+backend/.env
+frontend/.env
+
+# Build output
+frontend/dist/
+frontend/tsconfig.tsbuildinfo
+*.egg-info/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Data (future phases)
+backend/data/
