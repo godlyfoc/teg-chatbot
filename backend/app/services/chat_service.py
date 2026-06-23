@@ -4,12 +4,12 @@ from collections.abc import AsyncGenerator
 
 from app.config import Settings
 from app.models.chat import ChatMessage
-from app.services.llm.base import get_llm_provider
+from app.services.llm.openai_provider import OpenAIChat
 
 
 class ChatService:
     def __init__(self, settings: Settings):
-        self.llm = get_llm_provider(settings)
+        self.llm = OpenAIChat(settings)
 
     async def stream(
         self,
@@ -20,5 +20,5 @@ class ChatService:
             yield chunk
 
     @property
-    def provider_info(self) -> dict:
-        return {"provider": self.llm.provider_name, "model": self.llm.model_name}
+    def model_info(self) -> dict:
+        return {"model": self.llm.model_name}

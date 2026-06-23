@@ -15,7 +15,7 @@ graph LR
     API --> Proxy["Website Proxy"]
     API --> CS["Chat Service"]
     Proxy --> TEG["teg.ie"]
-    CS --> LLM["LLM Provider"]
+    CS --> LLM["OpenAI"]
 ```
 
 ### Phase 1 Data Flow
@@ -24,7 +24,7 @@ graph LR
 User types question
   → Frontend sends POST /api/chat/stream
   → Backend ChatService receives message + history
-  → LLM Provider streams tokens
+  → OpenAI streams tokens
   → Backend sends SSE events to frontend
   → Frontend displays streaming response
 ```
@@ -66,7 +66,7 @@ Teg Chatbot/
     │   └── services/
     │       ├── chat_service.py
     │       ├── proxy_service.py
-    │       └── llm/             # OpenAI + Gemini providers
+    │       └── llm/             # OpenAI client + prompts
     ├── requirements.txt
     └── .env.example
 ```
@@ -76,7 +76,7 @@ Teg Chatbot/
 | File | Purpose |
 |------|---------|
 | `config.py` | Centralizes all settings from `.env` — one place to configure everything |
-| `services/llm/base.py` | Defines the LLM interface so providers are swappable |
+| `services/llm/openai_provider.py` | OpenAI streaming chat client |
 | `services/chat_service.py` | Business logic layer — later phases add RAG/agent calls here |
 | `api/chat.py` | Thin route handlers — validates input, calls service, returns response |
 | `hooks/useChat.ts` | Encapsulates chat state + streaming so components stay simple |
@@ -90,7 +90,7 @@ Teg Chatbot/
 
 - **Node.js** 18+ and npm
 - **Python** 3.11+
-- An API key from [OpenAI](https://platform.openai.com/api-keys) or [Google AI Studio](https://aistudio.google.com/apikey)
+- An [OpenAI](https://platform.openai.com/api-keys) API key
 
 ### 1. Clone and configure
 
@@ -120,7 +120,6 @@ copy .env.example .env        # Windows
 # cp .env.example .env        # macOS/Linux
 
 # Edit .env and add your API key:
-#   LLM_PROVIDER=openai
 #   OPENAI_API_KEY=sk-your-key-here
 ```
 
@@ -153,7 +152,7 @@ Then open http://localhost:8000
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/api/health` | Health check + active provider info |
+| `GET` | `/api/health` | Health check + active model info |
 | `POST` | `/api/chat/stream` | Stream chat response via SSE |
 | `GET/POST` | `/api/proxy/{path}` | Proxy teg.ie for iframe embedding |
 
@@ -179,23 +178,36 @@ data: {"done": true}
 
 ---
 
-## Switching LLM Providers
+## OpenAI Configuration
 
 Edit `backend/.env`:
 
 ```env
-# Use OpenAI (default)
-LLM_PROVIDER=openai
 OPENAI_API_KEY=sk-your-key
 OPENAI_MODEL=gpt-4o-mini
-
-# Or use Google Gemini
-LLM_PROVIDER=gemini
-GEMINI_API_KEY=your-gemini-key
-GEMINI_MODEL=gemini-2.0-flash
+MAX_TOKENS=1024
+TEMPERATURE=0.7
 ```
 
-Restart the backend after changing. No code changes needed.
+Restart the backend after changing.
+
+---
+
+## Phase 2: Website Crawler
+
+Crawls **all internal HTML pages** on teg.ie (BFS via fast HTTP) and **extracts text from all linked PDFs**. PDF bytes are parsed in memory only — no files saved to disk.
+
+```bash
+cd backend
+.venv\Scripts\activate
+pip install -r requirements.txt
+python scripts/crawl.py              # full crawl (~2-5 min)
+python scripts/crawl.py --dry-run    # HTML crawl only, show counts
+```
+
+Output: `backend/data/crawled_content.json` (gitignored)
+
+Each document includes `language` (`en` | `ga` | `mixed`) and `ingested_at`. The chatbot detects whether the user writes in Irish or English and responds in the same language.
 
 ---
 
@@ -205,10 +217,9 @@ Restart the backend after changing. No code changes needed.
 - **Dev**: Backend on :8000, React on :5173 (Vite proxies `/api` to backend)
 - **Prod**: `npm run build` then FastAPI serves `frontend/dist`
 - **Website proxy**: `/api/proxy/` — required because teg.ie blocks direct iframe embedding
-- **Adding a new LLM provider**: Create a class in `services/llm/`, implement `BaseLLMProvider`, register it in `get_llm_provider()`
 
 ---
 
 ## Next Steps
 
-When ready for Phase 2, add crawling and RAG services under `backend/app/services/`.
+Chunk `crawled_content.json`, embed, store in Qdrant, and wire RAG into the chat service.

@@ -15,5 +15,4 @@ class ChatRequest(BaseModel):
 
 class HealthResponse(BaseModel):
     status: str
-    provider: str
     model: str

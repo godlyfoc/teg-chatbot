@@ -18,10 +18,9 @@ def get_chat_service(settings: Settings = Depends(get_settings)) -> ChatService:
 
 @router.get("/health", response_model=HealthResponse)
 async def health_check(chat_service: ChatService = Depends(get_chat_service)):
-    info = chat_service.provider_info
+    info = chat_service.model_info
     return HealthResponse(
         status="ok",
-        provider=info["provider"],
         model=info["model"],
     )
 
