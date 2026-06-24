@@ -8,7 +8,9 @@ from dataclasses import dataclass, field
 
 import httpx
 
+from app.config import Settings, get_settings
 from app.models.document import CrawledDocument
+from app.services.crawler.browser import BrowserFetcher, fetch_rendered_html
 from app.services.crawler.extractor import html_to_document
 from app.services.crawler.utils import extract_links_from_html, normalize_html_url
 
@@ -82,6 +84,9 @@ async def discover_and_extract_html(
     base_url: str,
     allowed_domains: list[str],
     concurrency: int = 25,
+    *,
+    browser_fallback: bool = True,
+    browser_wait_ms: int = 2500,
 ) -> DiscoveryResult:
     """
     Walk all internal HTML pages (BFS via httpx), extract text, collect PDF links.
@@ -108,57 +113,74 @@ async def discover_and_extract_html(
             queue.append(url)
 
         processed = 0
-        while queue:
-            batch: list[str] = []
-            while queue and len(batch) < concurrency:
-                url = queue.popleft()
-                if url in seen_html:
-                    continue
-                seen_html.add(url)
-                batch.append(url)
+        browser_session = BrowserFetcher(wait_ms=browser_wait_ms) if browser_fallback else None
+        browser = await browser_session.__aenter__() if browser_session else None
+        try:
+            while queue:
+                batch: list[str] = []
+                while queue and len(batch) < concurrency:
+                    url = queue.popleft()
+                    if url in seen_html:
+                        continue
+                    seen_html.add(url)
+                    batch.append(url)
 
-            if not batch:
-                break
+                if not batch:
+                    break
 
-            async def fetch_one(url: str) -> tuple[str, str | None]:
-                try:
-                    response = await client.get(url)
-                    response.raise_for_status()
-                    content_type = response.headers.get("content-type", "")
-                    if "text/html" not in content_type and "application/xhtml" not in content_type:
+                async def fetch_one(url: str) -> tuple[str, str | None]:
+                    try:
+                        response = await client.get(url)
+                        response.raise_for_status()
+                        content_type = response.headers.get("content-type", "")
+                        if "text/html" not in content_type and "application/xhtml" not in content_type:
+                            return url, None
+                        return url, response.text
+                    except httpx.HTTPError as exc:
+                        logger.debug("Fetch failed %s: %s", url, exc)
                         return url, None
-                    return url, response.text
-                except httpx.HTTPError as exc:
-                    logger.debug("Fetch failed %s: %s", url, exc)
-                    return url, None
 
-            responses = await asyncio.gather(*[fetch_one(url) for url in batch])
+                responses = await asyncio.gather(*[fetch_one(url) for url in batch])
 
-            for url, html in responses:
-                if not html:
-                    result.html_failed += 1
-                    continue
+                for url, html in responses:
+                    if not html:
+                        result.html_failed += 1
+                        continue
 
-                doc = html_to_document(url, html)
-                if doc:
-                    result.html_documents.append(doc)
+                    extract_html = html
+                    doc = html_to_document(url, html)
+                    if not doc and browser:
+                        rendered = await fetch_rendered_html(
+                            url, wait_ms=browser_wait_ms, fetcher=browser
+                        )
+                        if rendered:
+                            doc = html_to_document(url, rendered)
+                            if doc:
+                                extract_html = rendered
+                                logger.info("Extracted JS-rendered content for %s", url)
 
-                link_html, link_pdfs = extract_links_from_html(
-                    html, url, base_url, allowed_domains
-                )
-                result.pdf_urls.update(link_pdfs)
-                for link in link_html:
-                    if link not in seen_html:
-                        queue.append(link)
+                    if doc:
+                        result.html_documents.append(doc)
 
-                processed += 1
-                if processed % 50 == 0:
-                    logger.info(
-                        "Crawling: %d HTML done, %d PDF links found, queue %d",
-                        len(result.html_documents),
-                        len(result.pdf_urls),
-                        len(queue),
+                    link_html, link_pdfs = extract_links_from_html(
+                        extract_html, url, base_url, allowed_domains
                     )
+                    result.pdf_urls.update(link_pdfs)
+                    for link in link_html:
+                        if link not in seen_html:
+                            queue.append(link)
+
+                    processed += 1
+                    if processed % 50 == 0:
+                        logger.info(
+                            "Crawling: %d HTML done, %d PDF links found, queue %d",
+                            len(result.html_documents),
+                            len(result.pdf_urls),
+                            len(queue),
+                        )
+        finally:
+            if browser_session is not None:
+                await browser_session.__aexit__(None, None, None)
 
     logger.info(
         "HTML crawl complete: %d pages, %d PDF links found, %d failed",

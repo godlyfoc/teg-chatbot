@@ -36,19 +36,13 @@ REMOVE_TAGS = [
     "audio",
     "source",
     "canvas",
-    "embed",
-    "object",
     "map",
     "link",
     "meta",
-    "button",
-    "input",
-    "select",
-    "textarea",
-    "form",
 ]
 
-BOILERPLATE_SELECTORS = [
+# teg.ie wraps pages in <form>; never decompose form tags globally.
+NAV_BOILERPLATE_SELECTORS = [
     "header",
     "footer",
     "nav",
@@ -56,37 +50,28 @@ BOILERPLATE_SELECTORS = [
     "[role='banner']",
     "[role='navigation']",
     "[role='contentinfo']",
-    "[role='complementary']",
-    ".header",
-    ".footer",
-    ".nav",
+    "#PhoneNav",
+    "#MainNav",
     ".navbar",
+    ".navbar-inverse",
+    ".navbar-inner",
+    ".navbar-collapse",
+    ".nav-collapse",
+    ".nav-desktop",
+    ".NavHorizontal",
     ".navigation",
-    ".sidebar",
-    ".breadcrumb",
-    ".breadcrumbs",
-    "#header",
-    "#footer",
-    "#nav",
-    "#sidebar",
-    "#menu",
-    ".menu",
-    ".post-meta",
-    ".entry-meta",
-    ".meta",
-    ".comments",
-    "#comments",
-    ".comment-list",
-    ".rss",
-    ".feed",
-    ".social",
-    ".share",
-    ".sharing",
     ".site-header",
     ".site-footer",
     ".skip-link",
     ".sr-only",
     ".visually-hidden",
+]
+
+TEG_MAIN_SELECTORS = [
+    "section#middle",
+    ".BlogContent",
+    ".BlogArticle",
+    "#content",
 ]
 
 
@@ -101,18 +86,29 @@ def _remove_tags(root: Tag, tag_names: list[str]) -> None:
         tag.decompose()
 
 
+def _extract_text(main: Tag) -> str:
+    return main.get_text(separator="\n", strip=True)
+
+
 def _find_main_content(soup: BeautifulSoup) -> Tag | None:
+    for selector in TEG_MAIN_SELECTORS:
+        node = soup.select_one(selector)
+        if node and len(node.get_text(strip=True)) >= 30:
+            return node
+
     return (
         soup.find("main")
-        or soup.find(id="content")
         or soup.find(class_="content")
         or soup.find("article")
         or soup.body
     )
 
 
-def _extract_text(main: Tag) -> str:
-    return main.get_text(separator="\n", strip=True)
+def _strip_navigation(main: Tag) -> None:
+    _decompose_matching(main, NAV_BOILERPLATE_SELECTORS)
+    for tag_name in ("button", "input", "select", "textarea"):
+        for node in main.find_all(tag_name):
+            node.decompose()
 
 
 def html_to_document(url: str, html: str) -> CrawledDocument | None:
@@ -124,14 +120,13 @@ def html_to_document(url: str, html: str) -> CrawledDocument | None:
 
     _remove_tags(soup, REMOVE_TAGS)
     _decompose_matching(soup, COOKIE_SELECTORS)
-    _decompose_matching(soup, BOILERPLATE_SELECTORS)
 
     main = _find_main_content(soup)
     if not main:
         return None
 
+    _strip_navigation(main)
     _remove_tags(main, REMOVE_TAGS)
-    _decompose_matching(main, BOILERPLATE_SELECTORS)
 
     content = _extract_text(main)
     if len(content.strip()) < 50:

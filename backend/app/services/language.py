@@ -101,14 +101,50 @@ def detect_language(text: str, url: str = "") -> LanguageCode:
     return language_from_url(url) if url else "mixed"
 
 
+def detect_query_language(message: str) -> Literal["en", "ga"]:
+    """Detect the language of a user query (en or ga) using langdetect."""
+    text = message.strip()
+    if not text:
+        return "en"
+
+    ga_chars = len(GA_CHARS.findall(text))
+    ga_words = len(GA_WORDS.findall(text))
+
+    # Short Irish queries may be below langdetect's reliable threshold.
+    if ga_chars >= 1 or ga_words >= 1:
+        en_words = len(
+            re.findall(
+                r"\b(the|and|for|with|exam|about|information|register|application|when|what|how)\b",
+                text,
+                re.I,
+            )
+        )
+        if ga_chars + ga_words * 2 >= en_words:
+            return "ga"
+
+    try:
+        from langdetect import DetectorFactory, detect_langs
+
+        DetectorFactory.seed = 0
+        scores = detect_langs(text)
+        if scores:
+            top = {lang.lang: lang.prob for lang in scores[:3]}
+            ga_prob = top.get("ga", 0.0)
+            en_prob = top.get("en", 0.0)
+            if ga_prob > en_prob:
+                return "ga"
+            return "en"
+    except Exception:
+        pass
+
+    if ga_chars + ga_words * 2 > 0:
+        return "ga"
+    return "en"
+
+
 def detect_user_language(message: str) -> LanguageCode:
     """Detect language of a user chat message (en or ga preferred)."""
-    lang = detect_language(message)
-    if lang == "mixed":
-        if GA_CHARS.search(message) or GA_WORDS.search(message):
-            return "ga"
-        return "en"
-    return lang
+    return detect_query_language(message)
 
 
 def bilingual_system_prompt(user_language: LanguageCode) -> str:
@@ -120,11 +156,25 @@ def bilingual_system_prompt(user_language: LanguageCode) -> str:
     if user_language == "ga":
         return (
             f"{base} "
-            "The user is writing in Irish (Gaeilge). Respond entirely in Irish (Gaeilge). "
-            "Use natural, standard Irish suitable for learners and exam candidates."
+            "The user wrote in Irish (Gaeilge). You MUST respond entirely in Irish (Gaeilge). "
+            "Do not respond in English. Use natural, standard Irish suitable for learners and exam candidates."
         )
     return (
         f"{base} "
-        "The user is writing in English. Respond entirely in English. "
-        "If the user switches to Irish, respond in Irish; if they use English, respond in English."
+        "The user wrote in English. You MUST respond entirely in English. "
+        "Do not respond in Irish unless quoting Irish source text."
+    )
+
+
+def no_context_message(user_language: LanguageCode) -> str:
+    if user_language == "ga":
+        return (
+            "Níor aimsíodh aon ábhar ábhartha ar teg.ie don cheist seo. "
+            "Mura bhfuil an freagra agat ó eolas ginearálta faoi TEG, abair go soiléir nach bhfuil "
+            "an t-eolas sin agat agus mol cuairt a thabhairt ar teg.ie nó teagmháil a dhéanamh le TEG."
+        )
+    return (
+        "No relevant content was retrieved from teg.ie for this question. "
+        "If you cannot answer from general TEG knowledge, say you do not have "
+        "that information and suggest visiting teg.ie or contacting TEG directly."
     )

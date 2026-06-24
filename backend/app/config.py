@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     crawl_base_url: str = "https://www.teg.ie"
     crawl_output_path: str = "data/crawled_content.json"
     crawl_concurrency: int = 25
+    crawl_browser_fallback: bool = True
+    crawl_browser_wait_ms: int = 2500
 
     chunk_output_path: str = "data/chunks.json"
     chunk_size: int = 1000
@@ -49,6 +51,11 @@ class Settings(BaseSettings):
     index_sparse_max_terms: int = 256
     index_recreate_collection: bool = False
     index_cache_path: str = "data/index_cache.pkl"
+
+    retrieval_enabled: bool = True
+    retrieval_top_k: int = 5
+    retrieval_prefetch_limit: int = 20
+    retrieval_max_context_chars: int = 6000
 
     @property
     def cors_origin_list(self) -> list[str]:

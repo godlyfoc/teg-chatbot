@@ -53,7 +53,13 @@ async def run_crawl(
     started = time.perf_counter()
     ingested_at = datetime.now(timezone.utc)
 
-    discovery = await discover_and_extract_html(base_url, allowed_domains, concurrency)
+    discovery = await discover_and_extract_html(
+        base_url,
+        allowed_domains,
+        concurrency,
+        browser_fallback=settings.crawl_browser_fallback,
+        browser_wait_ms=settings.crawl_browser_wait_ms,
+    )
 
     if dry_run:
         return {

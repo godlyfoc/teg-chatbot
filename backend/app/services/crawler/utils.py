@@ -83,15 +83,25 @@ def extract_links_from_html(
     pdf_urls: set[str] = set()
 
     soup = BeautifulSoup(html, "lxml")
+
+    def _maybe_add_pdf(raw_url: str) -> None:
+        pdf = normalize_pdf_url(raw_url, page_url, allowed_domains)
+        if pdf:
+            pdf_urls.add(pdf)
+
     for anchor in soup.find_all("a", href=True):
         href = anchor["href"]
         if is_pdf_url(href) or href.lower().endswith(".pdf"):
-            pdf = normalize_pdf_url(href, page_url, allowed_domains)
-            if pdf:
-                pdf_urls.add(pdf)
+            _maybe_add_pdf(href)
         else:
             page = normalize_html_url(href, page_url, allowed_domains)
             if page:
                 html_urls.add(page)
+
+    for tag in soup.find_all(["iframe", "embed", "object"]):
+        for attr in ("src", "data", "href"):
+            raw = tag.get(attr)
+            if raw and (is_pdf_url(raw) or raw.lower().endswith(".pdf")):
+                _maybe_add_pdf(raw)
 
     return html_urls, pdf_urls

@@ -16,3 +16,5 @@ class ChatRequest(BaseModel):
 class HealthResponse(BaseModel):
     status: str
     model: str
+    retrieval_enabled: bool = True
+    retrieval_engine: str = "langgraph"

@@ -126,3 +126,42 @@ class QdrantStore:
             return None
         payload = points[0].payload
         return dict(payload) if payload else None
+
+    def hybrid_search(
+        self,
+        *,
+        dense_vector: list[float],
+        sparse_indices: list[int],
+        sparse_values: list[float],
+        limit: int = 5,
+        prefetch_limit: int = 20,
+    ) -> list[tuple[dict, float]]:
+        """Run hybrid dense+sparse search with reciprocal rank fusion."""
+        if not self.client.collection_exists(self.collection):
+            return []
+
+        sparse_query = models.SparseVector(indices=sparse_indices, values=sparse_values)
+        response = self.client.query_points(
+            collection_name=self.collection,
+            prefetch=[
+                models.Prefetch(
+                    query=dense_vector,
+                    using=DENSE_VECTOR_NAME,
+                    limit=prefetch_limit,
+                ),
+                models.Prefetch(
+                    query=sparse_query,
+                    using=SPARSE_VECTOR_NAME,
+                    limit=prefetch_limit,
+                ),
+            ],
+            query=models.FusionQuery(fusion=models.Fusion.RRF),
+            limit=limit,
+            with_payload=True,
+        )
+
+        results: list[tuple[dict, float]] = []
+        for point in response.points:
+            payload = dict(point.payload) if point.payload else {}
+            results.append((payload, float(point.score)))
+        return results

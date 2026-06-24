@@ -22,6 +22,8 @@ async def health_check(chat_service: ChatService = Depends(get_chat_service)):
     return HealthResponse(
         status="ok",
         model=info["model"],
+        retrieval_enabled=info.get("retrieval_enabled", True),
+        retrieval_engine=info.get("retrieval_engine", "langgraph"),
     )
 
 
