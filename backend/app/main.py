@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.api.chat import router as chat_router
+from app.api.pipeline import router as pipeline_router
 from app.api.proxy import router as proxy_router
 from app.config import get_settings
 
@@ -28,6 +29,7 @@ app.add_middleware(
 )
 
 app.include_router(chat_router)
+app.include_router(pipeline_router)
 app.include_router(proxy_router)
 
 DIST_DIR = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"

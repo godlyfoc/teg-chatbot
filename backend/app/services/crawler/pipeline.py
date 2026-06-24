@@ -39,7 +39,12 @@ def _save_result(result: CrawlResult, output_path: Path) -> None:
     _write_json_atomic(output_path, result.model_dump(mode="json"))
 
 
-async def run_crawl(settings: Settings | None = None, *, dry_run: bool = False) -> CrawlResult | dict:
+async def run_crawl(
+    settings: Settings | None = None,
+    *,
+    dry_run: bool = False,
+    save: bool = True,
+) -> CrawlResult | dict:
     settings = settings or get_settings()
     base_url = settings.crawl_base_url
     allowed_domains = settings.crawl_allowed_domains
@@ -73,14 +78,28 @@ async def run_crawl(settings: Settings | None = None, *, dry_run: bool = False) 
     )
 
     output_path = _resolve_path(settings.crawl_output_path)
-    _save_result(result, output_path)
+    if save:
+        _save_result(result, output_path)
 
     elapsed = time.perf_counter() - started
     logger.info(
-        "Done in %.1fs — %d HTML, %d PDF → %s",
+        "Done in %.1fs — %d HTML, %d PDF%s",
         elapsed,
         stats.html_count,
         stats.pdf_count,
-        output_path,
+        f" → {output_path}" if save else " (not saved)",
     )
     return result
+
+
+def save_crawl_result(
+    result: CrawlResult,
+    settings: Settings | None = None,
+    *,
+    output_path: Path | None = None,
+) -> Path:
+    """Persist a crawl result to crawled_content.json."""
+    settings = settings or get_settings()
+    target = output_path or _resolve_path(settings.crawl_output_path)
+    _save_result(result, target)
+    return target

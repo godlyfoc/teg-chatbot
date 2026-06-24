@@ -33,3 +33,5 @@ Thumbs.db
 
 # Data (future phases)
 backend/data/
+qdrant_data/
+backend/data/qdrant/

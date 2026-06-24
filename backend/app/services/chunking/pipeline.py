@@ -146,26 +146,18 @@ async def chunk_document(
     return chunks, recursive_count, semantic_merges
 
 
-async def run_chunking(
+async def chunk_documents(
+    documents: list[CrawledDocument],
     settings: Settings | None = None,
-    *,
-    input_path: Path | None = None,
-    output_path: Path | None = None,
-    save: bool = True,
-) -> ChunkResult:
+) -> tuple[list[Chunk], int, int, int, int]:
     """
-    Load crawled_content.json, apply hybrid chunking, and optionally write chunks.json.
+    Chunk a list of crawled documents.
 
-    Does not modify the crawl pipeline or crawled_content.json.
+    Returns (chunks, documents_chunked, documents_skipped_empty,
+    documents_skipped_duplicate, recursive_chunks, semantic_merges).
     """
     settings = settings or get_settings()
     config = ChunkingConfig.from_settings(settings)
-
-    source_path = input_path or _resolve_path(settings.crawl_output_path)
-    target_path = output_path or _resolve_path(settings.chunk_output_path)
-
-    crawl_data = json.loads(source_path.read_text(encoding="utf-8"))
-    crawl_result = CrawlResult.model_validate(crawl_data)
 
     embedder: EmbeddingClient | None = None
     if config.enable_semantic:
@@ -189,23 +181,20 @@ async def run_chunking(
     total_recursive_chunks = 0
     total_semantic_merges = 0
 
-    for document in crawl_result.documents:
+    for document in documents:
         if document.url in seen_urls:
             documents_skipped_duplicate += 1
-            logger.debug("Skipping duplicate URL: %s", document.url)
             continue
         seen_urls.add(document.url)
 
         content = document.content.strip()
         if not content:
             documents_skipped_empty += 1
-            logger.debug("Skipping empty document: %s", document.url)
             continue
 
         content_hash = _content_hash(content)
         if content_hash in seen_content_hashes:
             documents_skipped_duplicate += 1
-            logger.debug("Skipping duplicate content: %s", document.url)
             continue
         seen_content_hashes.add(content_hash)
 
@@ -220,6 +209,46 @@ async def run_chunking(
         documents_chunked += 1
         total_recursive_chunks += recursive_count
         total_semantic_merges += semantic_merges
+
+    return (
+        all_chunks,
+        documents_chunked,
+        documents_skipped_empty,
+        documents_skipped_duplicate,
+        total_recursive_chunks,
+        total_semantic_merges,
+    )
+
+
+async def run_chunking(
+    settings: Settings | None = None,
+    *,
+    input_path: Path | None = None,
+    output_path: Path | None = None,
+    save: bool = True,
+) -> ChunkResult:
+    """
+    Load crawled_content.json, apply hybrid chunking, and optionally write chunks.json.
+
+    Does not modify the crawl pipeline or crawled_content.json.
+    """
+    settings = settings or get_settings()
+    config = ChunkingConfig.from_settings(settings)
+
+    source_path = input_path or _resolve_path(settings.crawl_output_path)
+    target_path = output_path or _resolve_path(settings.chunk_output_path)
+
+    crawl_data = json.loads(source_path.read_text(encoding="utf-8"))
+    crawl_result = CrawlResult.model_validate(crawl_data)
+
+    (
+        all_chunks,
+        documents_chunked,
+        documents_skipped_empty,
+        documents_skipped_duplicate,
+        total_recursive_chunks,
+        total_semantic_merges,
+    ) = await chunk_documents(crawl_result.documents, settings)
 
     stats = build_chunk_stats(
         total_documents=len(crawl_result.documents),
@@ -254,3 +283,18 @@ async def run_chunking(
         logger.info("Wrote %d chunks to %s", len(all_chunks), target_path)
 
     return result
+
+
+def save_chunk_result(
+    result: ChunkResult,
+    settings: Settings | None = None,
+    *,
+    output_path: Path | None = None,
+) -> Path:
+    """Persist a chunk result to chunks.json."""
+    settings = settings or get_settings()
+    target = output_path or _resolve_path(settings.chunk_output_path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    _write_json_atomic(target, result.model_dump(mode="json", by_alias=True))
+    logger.info("Wrote %d chunks to %s", len(result.chunks), target)
+    return target

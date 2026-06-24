@@ -68,7 +68,7 @@ Teg Chatbot/
     │       ├── proxy_service.py
     │       └── llm/             # OpenAI client + prompts
     ├── requirements.txt
-    └── .env.example
+    └── .env
 ```
 
 ### Why Each File Exists
@@ -115,12 +115,7 @@ source .venv/bin/activate
 # Install dependencies
 pip install -r requirements.txt
 
-# Create your environment file
-copy .env.example .env        # Windows
-# cp .env.example .env        # macOS/Linux
-
-# Edit .env and add your API key:
-#   OPENAI_API_KEY=sk-your-key-here
+# Edit backend/.env and set your OpenAI API key (OPENAI_API_KEY)
 ```
 
 ### 3. Frontend setup

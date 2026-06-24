@@ -38,9 +38,27 @@ class Settings(BaseSettings):
     chunk_embedding_batch_size: int = 64
     chunk_enable_semantic: bool = True
 
+    qdrant_url: str = "http://localhost:6333"
+    qdrant_api_key: str = ""
+    qdrant_path: str = ""
+    qdrant_collection: str = "teg_chunks"
+    index_embedding_model: str = "text-embedding-3-small"
+    index_embedding_batch_size: int = 64
+    index_embedding_dimensions: int = 1536
+    index_upsert_batch_size: int = 100
+    index_sparse_max_terms: int = 256
+    index_recreate_collection: bool = False
+    index_cache_path: str = "data/index_cache.pkl"
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    @property
+    def qdrant_storage(self) -> str:
+        """Human-readable target for logs/API responses."""
+        local = self.qdrant_path.strip()
+        return local if local else self.qdrant_url
 
     @property
     def crawl_allowed_domains(self) -> list[str]:
