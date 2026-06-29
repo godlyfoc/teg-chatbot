@@ -92,6 +92,7 @@ export default function ChatPanel({ onClose }: Props) {
       </div>
 
       <ChatInput onSend={sendMessage} disabled={isLoading} />
+      <p className="chat-panel__disclaimer">{CHAT_CONFIG.disclaimer}</p>
     </>
   );
 }
