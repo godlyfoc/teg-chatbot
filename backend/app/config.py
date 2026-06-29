@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     crawl_base_url: str = "https://www.teg.ie"
     crawl_output_path: str = "data/crawled_content.json"
     crawl_concurrency: int = 25
+    crawl_max_depth: int = 50
     crawl_browser_fallback: bool = True
     crawl_browser_wait_ms: int = 2500
 

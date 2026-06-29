@@ -59,6 +59,7 @@ async def run_crawl(
         concurrency,
         browser_fallback=settings.crawl_browser_fallback,
         browser_wait_ms=settings.crawl_browser_wait_ms,
+        max_depth=settings.crawl_max_depth,
     )
 
     if dry_run:

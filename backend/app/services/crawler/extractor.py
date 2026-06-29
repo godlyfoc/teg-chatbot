@@ -111,6 +111,19 @@ def _strip_navigation(main: Tag) -> None:
             node.decompose()
 
 
+def crawl4ai_result_to_document(result) -> CrawledDocument | None:
+    """Convert a Crawl4AI CrawlResult into a CrawledDocument."""
+    if not getattr(result, "success", False):
+        return None
+    url = (getattr(result, "redirected_url", None) or result.url or "").strip()
+    if not url:
+        return None
+    html = result.cleaned_html or result.html
+    if not html:
+        return None
+    return html_to_document(url, html)
+
+
 def html_to_document(url: str, html: str) -> CrawledDocument | None:
     soup = BeautifulSoup(html, "lxml")
 

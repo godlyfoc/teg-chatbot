@@ -190,13 +190,14 @@ Restart the backend after changing.
 
 ## Phase 2: Website Crawler
 
-Crawls **all internal HTML pages** on teg.ie (BFS via fast HTTP) and **extracts text from all linked PDFs**. PDF bytes are parsed in memory only — no files saved to disk.
+Crawls **all internal HTML pages** on teg.ie using [Crawl4AI](https://github.com/unclecode/crawl4ai) (BFS deep crawl + sitemap seeding) and **extracts text from all linked PDFs**. PDF bytes are parsed in memory only — no files saved to disk.
 
 ```bash
 cd backend
 .venv\Scripts\activate
 pip install -r requirements.txt
-python scripts/crawl.py              # full crawl (~2-5 min)
+crawl4ai-setup          # installs Playwright browsers (first time only)
+python scripts/crawl.py              # full crawl (~5-15 min)
 python scripts/crawl.py --dry-run    # HTML crawl only, show counts
 ```
 

@@ -1,4 +1,4 @@
-"""Discover all HTML pages (BFS) + PDF links; extract HTML in the same pass."""
+"""Discover all HTML pages (BFS) + PDF links via Crawl4AI."""
 
 import logging
 import re
@@ -7,12 +7,17 @@ from collections import deque
 from dataclasses import dataclass, field
 
 import httpx
+from crawl4ai import AsyncWebCrawler
 
-from app.config import Settings, get_settings
 from app.models.document import CrawledDocument
-from app.services.crawler.browser import BrowserFetcher, fetch_rendered_html
-from app.services.crawler.extractor import html_to_document
-from app.services.crawler.utils import extract_links_from_html, normalize_html_url
+from app.services.crawler.crawl4ai_config import build_browser_config, build_run_config
+from app.services.crawler.extractor import crawl4ai_result_to_document
+from app.services.crawler.utils import (
+    extract_links_from_html,
+    is_pdf_url,
+    normalize_html_url,
+    normalize_pdf_url,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +85,66 @@ async def _sitemap_html_urls(
     return urls
 
 
+def _iter_crawl_results(raw) -> list:
+    if raw is None:
+        return []
+    if isinstance(raw, list):
+        return raw
+    if hasattr(raw, "_results"):
+        return list(raw)
+    return [raw]
+
+
+def _result_url(result) -> str:
+    return (result.redirected_url or result.url or "").strip()
+
+
+def _collect_pdf_links(
+    result,
+    page_url: str,
+    base_url: str,
+    allowed_domains: list[str],
+    pdf_urls: set[str],
+) -> None:
+    links = result.links or {}
+    for bucket in ("internal", "external"):
+        for link in links.get(bucket, []):
+            href = link.get("href") if isinstance(link, dict) else getattr(link, "href", None)
+            if href and is_pdf_url(href):
+                pdf = normalize_pdf_url(href, page_url, allowed_domains)
+                if pdf:
+                    pdf_urls.add(pdf)
+
+    html = result.html or result.cleaned_html
+    if html:
+        _, page_pdfs = extract_links_from_html(html, page_url, base_url, allowed_domains)
+        pdf_urls.update(page_pdfs)
+
+
+def _discover_html_links(
+    result,
+    page_url: str,
+    base_url: str,
+    allowed_domains: list[str],
+) -> set[str]:
+    discovered: set[str] = set()
+    links = result.links or {}
+    for link in links.get("internal", []):
+        href = link.get("href") if isinstance(link, dict) else getattr(link, "href", None)
+        if not href:
+            continue
+        page = normalize_html_url(href, page_url, allowed_domains)
+        if page:
+            discovered.add(page)
+
+    html = result.html or result.cleaned_html
+    if html:
+        html_links, _ = extract_links_from_html(html, page_url, base_url, allowed_domains)
+        discovered.update(html_links)
+
+    return discovered
+
+
 async def discover_and_extract_html(
     base_url: str,
     allowed_domains: list[str],
@@ -87,20 +152,24 @@ async def discover_and_extract_html(
     *,
     browser_fallback: bool = True,
     browser_wait_ms: int = 2500,
+    max_depth: int = 50,
 ) -> DiscoveryResult:
     """
-    Walk all internal HTML pages (BFS via httpx), extract text, collect PDF links.
+    Walk all internal HTML pages (BFS via Crawl4AI), extract text, collect PDF links.
     PDFs are not followed or saved — only their URLs are collected for text extraction.
     """
-    import asyncio
-
     result = DiscoveryResult()
     seen_html: set[str] = set()
+    depths: dict[str, int] = {}
     queue: deque[str] = deque()
 
     start = normalize_html_url(base_url, base_url, allowed_domains)
-    if start:
-        queue.append(start)
+    if not start:
+        logger.error("Invalid crawl base URL: %s", base_url)
+        return result
+
+    queue.append(start)
+    depths[start] = 0
 
     limits = httpx.Limits(max_connections=concurrency, max_keepalive_connections=concurrency)
     async with httpx.AsyncClient(
@@ -110,77 +179,73 @@ async def discover_and_extract_html(
         headers={"User-Agent": "TEG-Chatbot-Crawler/1.0"},
     ) as client:
         for url in await _sitemap_html_urls(client, base_url, allowed_domains):
-            queue.append(url)
+            if url not in depths:
+                queue.append(url)
+                depths[url] = 0
 
-        processed = 0
-        browser_session = BrowserFetcher(wait_ms=browser_wait_ms) if browser_fallback else None
-        browser = await browser_session.__aenter__() if browser_session else None
-        try:
-            while queue:
-                batch: list[str] = []
-                while queue and len(batch) < concurrency:
-                    url = queue.popleft()
-                    if url in seen_html:
-                        continue
-                    seen_html.add(url)
-                    batch.append(url)
+    run_config = build_run_config(
+        concurrency=concurrency,
+        browser_wait_ms=browser_wait_ms,
+        browser_fallback=browser_fallback,
+    )
+    browser_config = build_browser_config()
+    processed = 0
 
-                if not batch:
-                    break
+    async with AsyncWebCrawler(config=browser_config) as crawler:
+        while queue:
+            batch: list[tuple[str, int]] = []
+            while queue and len(batch) < concurrency:
+                url = queue.popleft()
+                if url in seen_html:
+                    continue
+                seen_html.add(url)
+                batch.append((url, depths.get(url, 0)))
 
-                async def fetch_one(url: str) -> tuple[str, str | None]:
-                    try:
-                        response = await client.get(url)
-                        response.raise_for_status()
-                        content_type = response.headers.get("content-type", "")
-                        if "text/html" not in content_type and "application/xhtml" not in content_type:
-                            return url, None
-                        return url, response.text
-                    except httpx.HTTPError as exc:
-                        logger.debug("Fetch failed %s: %s", url, exc)
-                        return url, None
+            if not batch:
+                break
 
-                responses = await asyncio.gather(*[fetch_one(url) for url in batch])
+            raw = await crawler.arun_many([url for url, _ in batch], config=run_config)
+            for crawl_result, (_, parent_depth) in zip(
+                _iter_crawl_results(raw), batch, strict=False
+            ):
+                if not crawl_result.success:
+                    result.html_failed += 1
 
-                for url, html in responses:
-                    if not html:
-                        result.html_failed += 1
-                        continue
+                page_url = _result_url(crawl_result)
+                if not page_url:
+                    continue
 
-                    extract_html = html
-                    doc = html_to_document(url, html)
-                    if not doc and browser:
-                        rendered = await fetch_rendered_html(
-                            url, wait_ms=browser_wait_ms, fetcher=browser
-                        )
-                        if rendered:
-                            doc = html_to_document(url, rendered)
-                            if doc:
-                                extract_html = rendered
-                                logger.info("Extracted JS-rendered content for %s", url)
+                _collect_pdf_links(
+                    crawl_result,
+                    page_url,
+                    base_url,
+                    allowed_domains,
+                    result.pdf_urls,
+                )
 
-                    if doc:
-                        result.html_documents.append(doc)
+                document = crawl4ai_result_to_document(crawl_result)
+                if document:
+                    result.html_documents.append(document)
 
-                    link_html, link_pdfs = extract_links_from_html(
-                        extract_html, url, base_url, allowed_domains
-                    )
-                    result.pdf_urls.update(link_pdfs)
-                    for link in link_html:
-                        if link not in seen_html:
+                if parent_depth < max_depth:
+                    for link in _discover_html_links(
+                        crawl_result,
+                        page_url,
+                        base_url,
+                        allowed_domains,
+                    ):
+                        if link not in seen_html and link not in depths:
                             queue.append(link)
+                            depths[link] = parent_depth + 1
 
-                    processed += 1
-                    if processed % 50 == 0:
-                        logger.info(
-                            "Crawling: %d HTML done, %d PDF links found, queue %d",
-                            len(result.html_documents),
-                            len(result.pdf_urls),
-                            len(queue),
-                        )
-        finally:
-            if browser_session is not None:
-                await browser_session.__aexit__(None, None, None)
+                processed += 1
+                if processed % 50 == 0:
+                    logger.info(
+                        "Crawling: %d HTML done, %d PDF links found, queue %d",
+                        len(result.html_documents),
+                        len(result.pdf_urls),
+                        len(queue),
+                    )
 
     logger.info(
         "HTML crawl complete: %d pages, %d PDF links found, %d failed",

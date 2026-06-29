@@ -1,1 +1,1 @@
-"""Fast sitemap-based website crawler."""
+"""Website crawler powered by Crawl4AI."""
