@@ -14,9 +14,12 @@ class RetrievedChunk(BaseModel):
 
 class RetrievalResult(BaseModel):
     query: str
+    candidate_chunks: list[RetrievedChunk] = Field(default_factory=list)
     chunks: list[RetrievedChunk] = Field(default_factory=list)
     elapsed_seconds: float = 0.0
+    rerank_elapsed_seconds: float = 0.0
     query_language: str = "en"
+    context: str = ""
 
 
 class RetrievalSearchRequest(BaseModel):

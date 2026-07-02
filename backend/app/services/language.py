@@ -162,7 +162,8 @@ def bilingual_system_prompt(user_language: LanguageCode) -> str:
     return (
         f"{base} "
         "The user wrote in English. You MUST respond entirely in English. "
-        "Do not respond in Irish unless quoting Irish source text."
+        "If source excerpts are in Irish, translate the facts into English in your answer. "
+        "Do not respond in Irish unless quoting a short Irish phrase from a source."
     )
 
 

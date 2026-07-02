@@ -18,3 +18,5 @@ class HealthResponse(BaseModel):
     model: str
     retrieval_enabled: bool = True
     retrieval_engine: str = "langgraph"
+    langsmith_tracing: bool = False
+    langsmith_project: str | None = None

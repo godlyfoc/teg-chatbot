@@ -8,7 +8,9 @@ class RetrievalGraphState(TypedDict, total=False):
     top_k: int | None
     retrieval_enabled: bool
     query_language: str
+    candidate_chunks: list[dict]
     chunks: list[dict]
     elapsed_seconds: float
+    rerank_elapsed_seconds: float
     error: str | None
     context: str

@@ -1,4 +1,4 @@
-import { memo, useMemo } from "react";
+import { Children, isValidElement, memo, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkBreaks from "remark-breaks";
@@ -10,12 +10,46 @@ interface Props {
   content: string;
 }
 
+function getLinkText(children: React.ReactNode): string {
+  return Children.toArray(children)
+    .map((child) => {
+      if (typeof child === "string" || typeof child === "number") return String(child);
+      if (isValidElement<{ children?: React.ReactNode }>(child)) {
+        return getLinkText(child.props.children);
+      }
+      return "";
+    })
+    .join("")
+    .trim();
+}
+
+function isCitationLink(href: string | undefined, children: React.ReactNode): boolean {
+  if (!href?.startsWith("http")) return false;
+  return /^\d{1,2}$/.test(getLinkText(children));
+}
+
 const markdownComponents: Components = {
-  a: ({ href, children }) => (
-    <a href={href} target="_blank" rel="noopener noreferrer">
-      {children}
-    </a>
-  ),
+  a: ({ href, children, ...props }) => {
+    if (isCitationLink(href, children)) {
+      return (
+        <a
+          href={href}
+          className="markdown__citation"
+          target="_blank"
+          rel="noopener noreferrer"
+          title={`Source ${getLinkText(children)}`}
+          {...props}
+        >
+          {children}
+        </a>
+      );
+    }
+    return (
+      <a href={href} target="_blank" rel="noopener noreferrer" {...props}>
+        {children}
+      </a>
+    );
+  },
   table: ({ children }) => (
     <div className="markdown__table-wrap">
       <table>{children}</table>

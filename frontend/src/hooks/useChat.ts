@@ -19,9 +19,19 @@ export function useChat() {
       setError(null);
       setIsLoading(true);
 
-      const userMsg: Message = { id: newId(), role: "user", content: trimmed };
+      const userMsg: Message = {
+        id: newId(),
+        role: "user",
+        content: trimmed,
+        createdAt: Date.now(),
+      };
       const assistantId = newId();
-      const assistantMsg: Message = { id: assistantId, role: "assistant", content: "" };
+      const assistantMsg: Message = {
+        id: assistantId,
+        role: "assistant",
+        content: "",
+        createdAt: Date.now(),
+      };
 
       setMessages((prev) => [...prev, userMsg, assistantMsg]);
 
@@ -45,6 +55,16 @@ export function useChat() {
           setIsLoading(false);
           setMessages((prev) => prev.filter((m) => m.id !== assistantId));
           abortRef.current = null;
+        },
+        () => {
+          setMessages((prev) =>
+            prev.map((m) => (m.id === assistantId ? { ...m, content: "" } : m)),
+          );
+        },
+        (text) => {
+          setMessages((prev) =>
+            prev.map((m) => (m.id === assistantId ? { ...m, content: text } : m)),
+          );
         },
       );
     },

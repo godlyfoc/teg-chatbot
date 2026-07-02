@@ -5,6 +5,8 @@ export function streamMessage(
   onChunk: (text: string) => void,
   onDone: () => void,
   onError: (error: string) => void,
+  onReset?: () => void,
+  onReplace?: (text: string) => void,
 ): () => void {
   const controller = new AbortController();
 
@@ -41,6 +43,8 @@ export function streamMessage(
             onError(parsed.error);
             return;
           }
+          if (parsed.reset) onReset?.();
+          if (parsed.replace) onReplace?.(parsed.replace);
           if (parsed.content) onChunk(parsed.content);
           if (parsed.done) {
             onDone();

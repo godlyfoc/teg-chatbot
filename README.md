@@ -188,6 +188,68 @@ Restart the backend after changing.
 
 ---
 
+## LangSmith tracing (optional)
+
+Trace RAG retrieval (LangGraph) and OpenAI chat calls in [LangSmith](https://smith.langchain.com).
+
+### 1. Configure
+
+Add to `backend/.env`:
+
+```env
+LANGSMITH_TRACING=true
+LANGSMITH_API_KEY=lsv2_pt_your-key
+LANGSMITH_PROJECT=teg-chatbot
+```
+
+Restart the backend after saving.
+
+### 2. Verify tracing is on
+
+```bash
+curl http://localhost:8000/api/health
+```
+
+Expected:
+
+```json
+{
+  "status": "ok",
+  "model": "gpt-4o-mini",
+  "langsmith_tracing": true,
+  "langsmith_project": "teg-chatbot"
+}
+```
+
+### 3. Generate a trace
+
+Send a chat message from the UI, or:
+
+```bash
+curl -N -X POST http://localhost:8000/api/chat/stream ^
+  -H "Content-Type: application/json" ^
+  -d "{\"message\": \"What is TEG?\", \"history\": []}"
+```
+
+(macOS/Linux: replace `^` line continuations with `\`.)
+
+### 4. View in LangSmith
+
+1. Open https://smith.langchain.com
+2. Go to **Projects** → **teg-chatbot** (or your `LANGSMITH_PROJECT` name)
+3. You should see runs such as:
+   - **teg_chat** — full chat request
+   - **teg_retrieval_graph** — LangGraph nodes (`detect_language`, `retrieve`, `format_context`)
+   - **OpenAI** — streamed completion with token usage
+
+Click a run to inspect inputs, outputs, latency, and nested spans.
+
+### Disable tracing
+
+Set `LANGSMITH_TRACING=false` or remove the LangSmith variables from `.env`, then restart.
+
+---
+
 ## Phase 2: Website Crawler
 
 Crawls **all internal HTML pages** on teg.ie using [Crawl4AI](https://github.com/unclecode/crawl4ai) (BFS deep crawl + sitemap seeding) and **extracts text from all linked PDFs**. PDF bytes are parsed in memory only — no files saved to disk.

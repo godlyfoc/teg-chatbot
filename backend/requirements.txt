@@ -25,6 +25,10 @@ rank-bm25>=0.2.2
 # LangGraph retrieval orchestration
 langgraph>=0.2.0
 langchain-core>=0.3.0
+langsmith>=0.1.147
+
+# Reranking
+cohere>=5.0.0
 
 # Testing
 pytest>=8.0.0

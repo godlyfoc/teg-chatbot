@@ -102,7 +102,7 @@ class Retriever:
     ) -> RetrievalResult:
         started = time.perf_counter()
         settings = self.settings
-        limit = top_k or settings.retrieval_top_k
+        limit = top_k or settings.retrieval_candidate_k
 
         if not settings.openai_api_key:
             raise ValueError("OPENAI_API_KEY is required for retrieval")

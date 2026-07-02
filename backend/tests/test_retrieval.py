@@ -6,7 +6,7 @@ import pytest
 
 from app.models.retrieval import RetrievedChunk, RetrievalResult
 from app.services.language import detect_query_language
-from app.services.llm.prompts import build_system_message
+from app.services.rag.prompts import build_rag_system_message
 from app.services.retrieval.context import format_retrieval_context
 from app.services.retrieval.graph import RetrievalGraphRunner, build_retrieval_graph
 
@@ -39,37 +39,37 @@ def test_format_retrieval_context_respects_max_chars():
     assert len(context) <= 500
 
 
-def test_build_system_message_english():
-    prompt = build_system_message(
-        "When is the B1 exam?",
+def test_build_rag_system_message_english():
+    prompt = build_rag_system_message(
         context_chunks=[_chunk("B1 exams run in May.")],
+        max_context_chars=6000,
         query_language="en",
     )
+    assert "## Sources" in prompt
     assert "Respond in English only" in prompt
     assert "B1 exams run in May." in prompt
 
 
-def test_build_system_message_irish():
-    prompt = build_system_message(
-        "Cathain a bhíonn an scrúdú?",
+def test_build_rag_system_message_irish():
+    prompt = build_rag_system_message(
         context_chunks=[_chunk("Bíonn scrúduithe i mí na Bealtaine.")],
+        max_context_chars=6000,
         query_language="ga",
     )
     assert "Freagair i nGaeilge amháin" in prompt
-    assert "MUST respond entirely in Irish" in prompt
-
-
-def test_build_system_message_without_context_irish():
-    prompt = build_system_message("Dia dhuit", query_language="ga")
-    assert "Níor aimsíodh" in prompt
+    assert "Bíonn scrúduithe i mí na Bealtaine." in prompt
 
 
 @pytest.fixture
 def mock_settings():
     settings = MagicMock()
     settings.retrieval_enabled = True
-    settings.retrieval_top_k = 5
+    settings.retrieval_candidate_k = 20
+    settings.retrieval_rerank_top_k = 5
+    settings.retrieval_min_rerank_score = 0.15
     settings.retrieval_max_context_chars = 6000
+    settings.cohere_api_key = "test-cohere"
+    settings.cohere_rerank_model = "rerank-multilingual-v3.0"
     return settings
 
 
@@ -86,6 +86,12 @@ def sample_chunks():
     ]
 
 
+def _mock_reranker(sample_chunks):
+    reranker = MagicMock()
+    reranker.rerank = AsyncMock(return_value=(sample_chunks, 0.05))
+    return reranker
+
+
 @pytest.mark.asyncio
 async def test_retrieval_graph_detects_query_language(mock_settings, sample_chunks):
     runner = RetrievalGraphRunner(mock_settings)
@@ -97,6 +103,7 @@ async def test_retrieval_graph_detects_query_language(mock_settings, sample_chun
             elapsed_seconds=0.1,
         )
     )
+    runner._reranker = _mock_reranker(sample_chunks)
 
     result = await runner.run("Cathain a bhíonn an scrúdú?")
 
@@ -104,7 +111,7 @@ async def test_retrieval_graph_detects_query_language(mock_settings, sample_chun
 
 
 @pytest.mark.asyncio
-async def test_retrieval_graph_runner_returns_chunks(mock_settings, sample_chunks):
+async def test_retrieval_graph_runner_returns_reranked_chunks(mock_settings, sample_chunks):
     runner = RetrievalGraphRunner(mock_settings)
     runner._retriever = AsyncMock()
     runner._retriever.retrieve = AsyncMock(
@@ -114,11 +121,13 @@ async def test_retrieval_graph_runner_returns_chunks(mock_settings, sample_chunk
             elapsed_seconds=0.1,
         )
     )
+    runner._reranker = _mock_reranker(sample_chunks)
 
     result = await runner.run("B1 exams")
 
     assert len(result.chunks) == 1
     runner._retriever.retrieve.assert_awaited_once()
+    runner._reranker.rerank.assert_awaited_once()
 
 
 @pytest.mark.asyncio

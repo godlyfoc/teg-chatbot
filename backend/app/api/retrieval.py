@@ -18,7 +18,7 @@ async def search_chunks(
     request: RetrievalSearchRequest,
     runner: RetrievalGraphRunner = Depends(get_retrieval_runner),
 ):
-    """Hybrid search via LangGraph (dense + BM25 sparse → Qdrant RRF)."""
+    """Hybrid search via LangGraph (dense + BM25 → Cohere rerank)."""
     try:
         return await runner.run(request.query, top_k=request.top_k)
     except ValueError as exc:

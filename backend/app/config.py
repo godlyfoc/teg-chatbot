@@ -54,9 +54,24 @@ class Settings(BaseSettings):
     index_cache_path: str = "data/index_cache.pkl"
 
     retrieval_enabled: bool = True
-    retrieval_top_k: int = 5
+    retrieval_candidate_k: int = 20
+    retrieval_rerank_top_k: int = 5
     retrieval_prefetch_limit: int = 20
     retrieval_max_context_chars: int = 6000
+    retrieval_min_rerank_score: float = 0.15
+
+    cohere_api_key: str = ""
+    cohere_rerank_model: str = "rerank-multilingual-v3.0"
+
+    rag_temperature: float = 0.3
+    validation_max_retries: int = 2
+    rag_log_enabled: bool = True
+    rag_log_path: str = "data/rag_requests.jsonl"
+
+    langsmith_tracing: bool = False
+    langsmith_api_key: str = ""
+    langsmith_project: str = "teg-chatbot"
+    langsmith_endpoint: str = "https://api.smith.langchain.com"
 
     @property
     def cors_origin_list(self) -> list[str]:

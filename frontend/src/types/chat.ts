@@ -2,6 +2,7 @@ export interface Message {
   id: string;
   role: "user" | "assistant";
   content: string;
+  createdAt: number;
 }
 
 export interface ChatRequest {
@@ -11,6 +12,8 @@ export interface ChatRequest {
 
 export interface StreamEvent {
   content?: string;
+  replace?: string;
+  reset?: boolean;
   done?: boolean;
   error?: string;
 }

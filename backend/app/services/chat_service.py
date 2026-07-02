@@ -1,61 +1,48 @@
-"""Chat business logic with LangGraph RAG retrieval."""
-
-import logging
-from collections.abc import AsyncGenerator
-
-from app.config import Settings
-from app.models.chat import ChatMessage
-from app.models.retrieval import RetrievalResult
-from app.services.language import detect_query_language
-from app.services.llm.openai_provider import OpenAIChat
-from app.services.retrieval.graph import RetrievalGraphRunner
-
-logger = logging.getLogger(__name__)
-
-
-class ChatService:
-    def __init__(self, settings: Settings):
-        self.settings = settings
-        self.llm = OpenAIChat(settings)
-        self.retrieval_graph = RetrievalGraphRunner(settings)
-
-    async def retrieve(self, query: str) -> RetrievalResult:
-        return await self.retrieval_graph.run(query)
-
-    async def stream(
-        self,
-        message: str,
-        history: list[ChatMessage] | None = None,
-    ) -> AsyncGenerator[str, None]:
-        context_chunks = None
-        query_language = detect_query_language(message)
-
-        if self.settings.retrieval_enabled:
-            try:
-                result = await self.retrieval_graph.run(message)
-                context_chunks = result.chunks
-                query_language = result.query_language
-                logger.info(
-                    "LangGraph RAG: %d chunks (%.3fs), query_lang=%s",
-                    len(context_chunks),
-                    result.elapsed_seconds,
-                    query_language,
-                )
-            except Exception:
-                logger.exception("Retrieval graph failed — falling back to direct LLM response")
-
-        async for chunk in self.llm.stream(
-            message,
-            history or [],
-            context_chunks=context_chunks,
-            query_language=query_language,
-        ):
-            yield chunk
-
-    @property
-    def model_info(self) -> dict:
-        return {
-            "model": self.llm.model_name,
-            "retrieval_enabled": self.settings.retrieval_enabled,
-            "retrieval_engine": "langgraph",
-        }
+"""Chat business logic with LangGraph RAG retrieval."""
+
+import logging
+from collections.abc import AsyncGenerator
+from typing import Any
+
+from app.config import Settings
+from app.models.chat import ChatMessage
+from app.models.retrieval import RetrievalResult
+from app.services.rag.pipeline import RAGPipeline
+from app.services.retrieval.graph import RetrievalGraphRunner
+
+logger = logging.getLogger(__name__)
+
+
+class ChatService:
+    def __init__(self, settings: Settings):
+        self.settings = settings
+        self.rag_pipeline = RAGPipeline(settings)
+        self.retrieval_graph = RetrievalGraphRunner(settings)
+
+    async def retrieve(self, query: str) -> RetrievalResult:
+        return await self.retrieval_graph.run(query)
+
+    async def stream(
+        self,
+        message: str,
+        history: list[ChatMessage] | None = None,
+    ) -> AsyncGenerator[dict[str, Any], None]:
+        async for event in self.rag_pipeline.stream_execute(message, history or []):
+            yield event
+
+    @property
+    def model_info(self) -> dict:
+        from app.observability.langsmith import is_langsmith_enabled
+
+        return {
+            "model": self.rag_pipeline.llm.model_name,
+            "retrieval_enabled": self.settings.retrieval_enabled,
+            "retrieval_engine": "langgraph+cohere-rerank",
+            "retrieval_candidate_k": self.settings.retrieval_candidate_k,
+            "retrieval_rerank_top_k": self.settings.retrieval_rerank_top_k,
+            "validation_max_retries": self.settings.validation_max_retries,
+            "langsmith_tracing": is_langsmith_enabled(self.settings),
+            "langsmith_project": self.settings.langsmith_project
+            if is_langsmith_enabled(self.settings)
+            else None,
+        }

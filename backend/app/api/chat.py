@@ -24,6 +24,8 @@ async def health_check(chat_service: ChatService = Depends(get_chat_service)):
         model=info["model"],
         retrieval_enabled=info.get("retrieval_enabled", True),
         retrieval_engine=info.get("retrieval_engine", "langgraph"),
+        langsmith_tracing=info.get("langsmith_tracing", False),
+        langsmith_project=info.get("langsmith_project"),
     )
 
 
@@ -34,8 +36,8 @@ async def chat_stream(
 ):
     async def event_generator():
         try:
-            async for chunk in chat_service.stream(request.message, request.history):
-                yield f"data: {json.dumps({'content': chunk})}\n\n"
+            async for event in chat_service.stream(request.message, request.history):
+                yield f"data: {json.dumps(event)}\n\n"
             yield f"data: {json.dumps({'done': True})}\n\n"
         except Exception as exc:
             yield f"data: {json.dumps({'error': str(exc)})}\n\n"
