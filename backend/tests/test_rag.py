@@ -68,6 +68,15 @@ def rag_settings():
     settings.validation_max_retries = 1
     settings.rag_log_enabled = False
     settings.rag_log_path = "data/rag_requests.jsonl"
+    settings.openai_api_key = "test-openai"
+    settings.index_embedding_model = "text-embedding-3-small"
+    settings.index_embedding_dimensions = 1536
+    # Real (non-mock) values so Retriever.__init__ doesn't mistake a MagicMock
+    # attribute for a truthy local path and create a stray on-disk Qdrant store.
+    settings.qdrant_path = ""
+    settings.qdrant_url = "http://localhost:6333"
+    settings.qdrant_api_key = ""
+    settings.qdrant_collection = "test_collection"
     return settings
 
 

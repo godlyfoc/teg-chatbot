@@ -7,10 +7,14 @@ LanguageCode = Literal["en", "ga", "mixed"]
 
 # Irish-specific characters and words (Gaeilge)
 GA_CHARS = re.compile(r"[áéíóúÁÉÍÓÚ]")
-GA_WORDS = re.compile(
-    r"\b(agus|an|na|ar|le|do|go|ní|bhí|atá|scrúdú|gaeilge|teastas|iarrthóir|múinteoir)\b",
+# Unambiguous Irish words — safe to trust even on their own.
+GA_WORDS_STRONG = re.compile(
+    r"\b(agus|ní|bhí|atá|scrúdú|gaeilge|teastas|iarrthóir|múinteoir)\b",
     re.IGNORECASE,
 )
+# Short function words that double as common English words ("do", "go", "an"...) —
+# only meaningful as an Irish signal when several show up together.
+GA_WORDS_WEAK = re.compile(r"\b(an|na|ar|le|do|go)\b", re.IGNORECASE)
 
 URL_GA_MARKERS = (
     "/nuacht/",
@@ -58,15 +62,18 @@ def detect_language(text: str, url: str = "") -> LanguageCode:
         return language_from_url(url)
 
     ga_chars = len(GA_CHARS.findall(sample))
-    ga_words = len(GA_WORDS.findall(sample))
+    ga_strong = len(GA_WORDS_STRONG.findall(sample))
+    ga_weak = len(GA_WORDS_WEAK.findall(sample))
+    ga_words = ga_strong * 2 + ga_weak
     en_words = len(re.findall(
         r"\b(the|and|for|with|exam|about|information|register|application)\b",
         sample,
         re.I,
     ))
 
-    # Strong Irish signals override langdetect (common on teg.ie)
-    if ga_chars >= 2 or ga_words >= 2:
+    # Strong Irish signals override langdetect (common on teg.ie). A lone weak
+    # word doesn't count — "do"/"go"/"an" are common English words too.
+    if ga_chars >= 2 or ga_strong >= 1 or ga_weak >= 2:
         if ga_chars + ga_words * 2 >= en_words + 1:
             return "ga"
 
@@ -108,20 +115,16 @@ def detect_query_language(message: str) -> Literal["en", "ga"]:
         return "en"
 
     ga_chars = len(GA_CHARS.findall(text))
-    ga_words = len(GA_WORDS.findall(text))
+    ga_strong = len(GA_WORDS_STRONG.findall(text))
+    ga_weak = len(GA_WORDS_WEAK.findall(text))
 
-    # Short Irish queries may be below langdetect's reliable threshold.
-    if ga_chars >= 1 or ga_words >= 1:
-        en_words = len(
-            re.findall(
-                r"\b(the|and|for|with|exam|about|information|register|application|when|what|how)\b",
-                text,
-                re.I,
-            )
-        )
-        if ga_chars + ga_words * 2 >= en_words:
-            return "ga"
+    # Accented characters or an unambiguous Irish word are reliable on their own,
+    # even for short queries that fall below langdetect's reliable threshold.
+    if ga_chars >= 1 or ga_strong >= 1:
+        return "ga"
 
+    # Words like "do"/"go"/"an" are common English words too — never trust them
+    # alone; let langdetect (whole-sentence structure, not word overlap) decide.
     try:
         from langdetect import DetectorFactory, detect_langs
 
@@ -137,7 +140,7 @@ def detect_query_language(message: str) -> Literal["en", "ga"]:
     except Exception:
         pass
 
-    if ga_chars + ga_words * 2 > 0:
+    if ga_strong >= 1 or ga_weak >= 2:
         return "ga"
     return "en"
 

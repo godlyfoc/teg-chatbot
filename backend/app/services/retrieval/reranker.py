@@ -29,7 +29,7 @@ class CohereReranker:
         self.settings = settings or get_settings()
         if not self.settings.cohere_api_key.strip():
             raise ValueError("COHERE_API_KEY is required for reranking")
-        self._client = cohere.AsyncClientV2(api_key=self.settings.cohere_api_key)
+        self._client = cohere.AsyncClientV2(api_key=self.settings.cohere_api_key, timeout=20.0)
 
     async def rerank(
         self,

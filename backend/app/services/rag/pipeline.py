@@ -23,23 +23,12 @@ from app.services.rag.conversational import (
 from app.services.rag.formatting import format_response_for_display
 from app.services.rag.messages import fallback_message
 from app.services.rag.prompts import build_rag_system_message, build_regeneration_message
-from app.services.rag.response_language import ensure_response_language
+from app.services.rag.response_language import ensure_response_language, needs_translation
 from app.services.retrieval.context import format_retrieval_context
 from app.services.retrieval.graph import RetrievalGraphRunner
 from app.services.validation.validator import ResponseValidator, extract_citations
 
 logger = logging.getLogger(__name__)
-
-
-async def _yield_text_stream(text: str) -> AsyncGenerator[dict[str, Any], None]:
-    """Stream pre-built text to the client in small chunks."""
-    if not text:
-        return
-    words = text.split(" ")
-    for index, word in enumerate(words):
-        chunk = word if index == len(words) - 1 else f"{word} "
-        yield {"content": chunk}
-        await asyncio.sleep(0)
 
 
 def _chunk_summary(chunks: list[RetrievedChunk]) -> list[dict]:
@@ -63,6 +52,14 @@ class RAGPipeline:
         self.llm = OpenAIChat(settings)
         self.retrieval_graph = RetrievalGraphRunner(settings)
         self.validator = ResponseValidator(settings)
+        self._background_tasks: set[asyncio.Task] = set()
+
+    def _spawn_background_task(self, coro) -> None:
+        """Run *coro* without awaiting it, keeping a strong reference so
+        asyncio cannot garbage-collect it mid-execution."""
+        task = asyncio.create_task(coro)
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
 
     async def _apply_response_language(
         self,
@@ -143,6 +140,7 @@ class RAGPipeline:
                 display_response = format_response_for_display(
                     response,
                     query_language,  # type: ignore[arg-type]
+                    fallback_chunks=context_chunks,
                 )
                 display_response = await self._apply_response_language(
                     display_response,
@@ -199,7 +197,15 @@ class RAGPipeline:
         message: str,
         history: list[ChatMessage] | None = None,
     ) -> AsyncGenerator[dict[str, Any], None]:
-        """Stream generation tokens live, then validate and finalize."""
+        """Stream generation tokens live; validation runs as background QA only.
+
+        Tokens are forwarded to the client as soon as the LLM produces them —
+        there is no buffer-then-validate gate. Once generation finishes, a
+        formatted version is pushed via a `replace` event, and citation/
+        grounding validation runs in the background purely to log QA signal
+        (rag_requests.jsonl); it never blocks, retries, or swaps in the
+        fallback message.
+        """
         history = history or []
         query_language: LanguageCode = detect_query_language(message)
         log_record = RAGRequestLog(
@@ -245,80 +251,77 @@ class RAGPipeline:
             query_language=query_language,  # type: ignore[arg-type]
         )
 
-        extra_messages: list[dict] = []
-        attempts = 0
-        max_attempts = self.settings.validation_max_retries + 1
-        last_response = ""
-        last_validation_errors: list[str] = []
+        accumulated = ""
+        async for token in self.llm.generate_stream(
+            message,
+            history,
+            system_message=system_message,
+        ):
+            accumulated += token
+            yield {"content": token}
 
-        while attempts < max_attempts:
-            accumulated = ""
-            async for token in self.llm.generate_stream(
-                message,
-                history,
-                system_message=system_message,
-                extra_messages=extra_messages or None,
-            ):
-                accumulated += token
+        if not accumulated.strip():
+            async for event in self._stream_fallback(query_language, log_record, reason="empty_response"):
+                yield event
+            return
 
-            last_response = accumulated
-            validation = await self.validator.validate(
-                response=accumulated,
+        final_text = accumulated
+        if needs_translation(accumulated, query_language):  # type: ignore[arg-type]
+            logger.info("Response language mismatch — translating to %s", query_language)
+            final_text = await self.llm.translate(accumulated, query_language)  # type: ignore[arg-type]
+
+        display_response = format_response_for_display(
+            final_text,
+            query_language,  # type: ignore[arg-type]
+            fallback_chunks=context_chunks,
+        )
+        yield {"replace": display_response}
+
+        log_record.generated_response = display_response
+        log_record.regeneration_attempts = 0
+        log_record.fallback_returned = False
+        self._spawn_background_task(
+            self._run_background_validation(
+                response=final_text,
                 context_chunks=context_chunks,
                 context_text=context_text,
                 query_language=query_language,  # type: ignore[arg-type]
+                log_record=log_record,
             )
+        )
 
-            if validation.passed:
-                display_response = format_response_for_display(
-                    accumulated,
-                    query_language,  # type: ignore[arg-type]
-                )
-                display_response = await self._apply_response_language(
-                    display_response,
-                    query_language,  # type: ignore[arg-type]
-                )
-                async for event in _yield_text_stream(display_response):
-                    yield event
-                log_record.generated_response = display_response
-                log_record.validation_result = "pass"
-                log_record.regeneration_attempts = attempts
-                log_record.fallback_returned = False
-                log_rag_request(log_record, self.settings)
-                return
+    async def _run_background_validation(
+        self,
+        *,
+        response: str,
+        context_chunks: list[RetrievedChunk],
+        context_text: str,
+        query_language: LanguageCode,
+        log_record: RAGRequestLog,
+    ) -> None:
+        """Run citation/grounding checks after the answer has already been shown.
 
-            last_validation_errors = validation.errors
-            attempts += 1
-            logger.warning(
-                "Validation failed during stream (attempt %d/%d): %s",
-                attempts,
-                max_attempts,
-                "; ".join(validation.errors),
+        Purely a QA signal recorded to rag_requests.jsonl for monitoring and
+        future prompt tuning — never affects what the user sees.
+        """
+        try:
+            validation = await self.validator.validate(
+                response=response,
+                context_chunks=context_chunks,
+                context_text=context_text,
+                query_language=query_language,
             )
-            if attempts < max_attempts:
-                extra_messages = [
-                    {"role": "assistant", "content": accumulated},
-                    {
-                        "role": "user",
-                        "content": build_regeneration_message(
-                            validation.errors,
-                            query_language,  # type: ignore[arg-type]
-                        ),
-                    },
-                ]
-                continue
-
-        log_record.generated_response = last_response
-        log_record.validation_result = "fail"
-        log_record.validation_errors = last_validation_errors
-        log_record.regeneration_attempts = attempts
-        async for event in self._stream_fallback(
-            query_language,
-            log_record,
-            reason="validation_failed",
-            attempted_response=last_response,
-        ):
-            yield event
+            log_record.validation_result = "pass" if validation.passed else "fail"
+            log_record.validation_errors = validation.errors
+            if not validation.passed:
+                logger.warning(
+                    "Background validation flagged response (already shown to user): %s",
+                    "; ".join(validation.errors),
+                )
+        except Exception:
+            logger.exception("Background validation failed")
+            log_record.validation_result = "error"
+        log_rag_request(log_record, self.settings)
 
     async def _execute_conversational(
         self,
@@ -367,10 +370,15 @@ class RAGPipeline:
             temperature=self.settings.temperature,
         ):
             accumulated += token
-        final_response = await self._apply_response_language(accumulated, query_language)
-        async for event in _yield_text_stream(final_response):
-            yield event
-        log_record.generated_response = final_response
+            yield {"content": token}
+
+        final_text = accumulated
+        if needs_translation(accumulated, query_language):  # type: ignore[arg-type]
+            logger.info("Response language mismatch — translating to %s", query_language)
+            final_text = await self.llm.translate(accumulated, query_language)  # type: ignore[arg-type]
+            yield {"replace": final_text}
+
+        log_record.generated_response = final_text
         log_record.validation_result = "skipped"
         log_record.regeneration_attempts = 0
         log_record.fallback_returned = False

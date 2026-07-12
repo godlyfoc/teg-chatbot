@@ -70,6 +70,15 @@ def mock_settings():
     settings.retrieval_max_context_chars = 6000
     settings.cohere_api_key = "test-cohere"
     settings.cohere_rerank_model = "rerank-multilingual-v3.0"
+    settings.openai_api_key = "test-openai"
+    settings.index_embedding_model = "text-embedding-3-small"
+    settings.index_embedding_dimensions = 1536
+    # Real (non-mock) values so Retriever.__init__ doesn't mistake a MagicMock
+    # attribute for a truthy local path and create a stray on-disk Qdrant store.
+    settings.qdrant_path = ""
+    settings.qdrant_url = "http://localhost:6333"
+    settings.qdrant_api_key = ""
+    settings.qdrant_collection = "test_collection"
     return settings
 
 

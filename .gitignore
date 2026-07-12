@@ -34,4 +34,6 @@ Thumbs.db
 # Data (future phases)
 backend/data/
 qdrant_data/
-backend/data/qdrant/
+
+# Stray local Qdrant storage created by test runs with mocked settings
+backend/MagicMock/

@@ -4,11 +4,6 @@ export const ga: ChatMessages = {
   title: "Cúntóir AI TEG",
   subtitle: "Fiafraigh díom faoi TEG",
   welcome: "Dia duit! Is mise cúntóir TEG. Conas is féidir liom cabhrú leat?",
-  suggestions: [
-    "Cad é TEG?",
-    "Cén leibhéil scrúdaithe atá ar fáil?",
-    "Conas a dhéanaim teagmháil le TEG?",
-  ],
   disclaimer: "D’fhéadfadh go mbeadh gá fíorú a dhéanamh ar fhreagraí an chúntóra.",
   inputPlaceholder: "Cuir ceist…",
   inputAriaLabel: "Teachtaireacht",

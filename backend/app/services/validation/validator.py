@@ -39,15 +39,19 @@ def _normalize_url(url: str) -> str:
     return url.strip().rstrip("/").lower()
 
 
-def _normalize_title(title: str) -> str:
-    return re.sub(r"\s+", " ", title.strip().lower())
-
-
 def validate_citations(
     response: str,
     context_chunks: list[RetrievedChunk],
 ) -> ValidationResult:
-    """Rule-based citation URL/title checks."""
+    """Rule-based citation checks.
+
+    Only the cited URL is checked against retrieved chunks — that's the
+    property that actually matters for grounding (the model didn't invent a
+    source). Title text is not checked: many chunks (disproportionately
+    Irish-language PDFs) have no title metadata, and the model's own
+    rendering of a title (paraphrased, typo-corrected, or inferred from
+    content) is expected to differ from the raw scraped string.
+    """
     errors: list[str] = []
     citations = extract_citations(response)
 
@@ -57,24 +61,12 @@ def validate_citations(
     if not citations:
         errors.append("Response is missing citations in the '## Sources' section.")
 
-    allowed_by_url: dict[str, set[str]] = {}
-    for chunk in context_chunks:
-        url_key = _normalize_url(chunk.source_url)
-        allowed_by_url.setdefault(url_key, set()).add(_normalize_title(chunk.title or "Untitled"))
+    allowed_urls = {_normalize_url(chunk.source_url) for chunk in context_chunks}
 
     for citation in citations:
         url_key = _normalize_url(citation.url)
-        if url_key not in allowed_by_url:
+        if url_key not in allowed_urls:
             errors.append(f"Cited URL not found in retrieved context: {citation.url}")
-            continue
-        allowed_titles = allowed_by_url[url_key]
-        cited_title = _normalize_title(citation.title)
-        if cited_title not in allowed_titles and not any(
-            cited_title in title or title in cited_title for title in allowed_titles
-        ):
-            errors.append(
-                f"Cited title '{citation.title}' does not match retrieved title(s) for {citation.url}",
-            )
 
     return ValidationResult(passed=not errors, errors=errors)
 
@@ -84,7 +76,7 @@ class ResponseValidator:
 
     def __init__(self, settings: Settings | None = None):
         self.settings = settings or get_settings()
-        self._client = AsyncOpenAI(api_key=self.settings.openai_api_key)
+        self._client = AsyncOpenAI(api_key=self.settings.openai_api_key, timeout=20.0)
 
     async def validate(
         self,
@@ -118,12 +110,18 @@ class ResponseValidator:
         query_language: LanguageCode,
     ) -> ValidationResult:
         prompt = (
-            "You are a strict fact-checking validator for a RAG chatbot.\n"
-            "Given SOURCE EXCERPTS and an ASSISTANT RESPONSE, decide whether every factual "
-            "statement in the Answer section is directly supported by the excerpts.\n"
+            "You are a fact-checking validator for a RAG chatbot.\n"
+            "Given SOURCE EXCERPTS and an ASSISTANT RESPONSE, decide whether the Answer section "
+            "contradicts the excerpts or fabricates specific facts (dates, numbers, names, "
+            "procedures) that appear nowhere in the excerpts.\n"
             "Ignore the Sources section when judging support; only judge factual claims in Answer.\n"
-            "Return JSON only: {\"passed\": true|false, \"errors\": [\"...\"]}\n"
-            "Fail if any unsupported, speculative, or hallucinated claim is present."
+            "Do NOT fail for: paraphrasing or summarizing the excerpts in different words; "
+            "translating the excerpts' facts between English and Irish; reasonable inference that "
+            "a reader would draw from the excerpts; or the assistant honestly noting that the "
+            "excerpts don't cover some aspect of the question.\n"
+            "Only fail for a genuine contradiction of the excerpts, or a specific fact stated as "
+            "true that has no basis anywhere in the excerpts.\n"
+            "Return JSON only: {\"passed\": true|false, \"errors\": [\"...\"]}"
         )
         if query_language == "ga":
             prompt += "\nThe response should be in Irish, but return validator errors in English."

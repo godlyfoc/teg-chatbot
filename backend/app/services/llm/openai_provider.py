@@ -17,7 +17,7 @@ from app.services.llm.prompts import build_system_message
 class OpenAIChat:
     def __init__(self, settings: Settings):
         self.settings = settings
-        client = AsyncOpenAI(api_key=settings.openai_api_key)
+        client = AsyncOpenAI(api_key=settings.openai_api_key, timeout=20.0)
         self.client = wrappers.wrap_openai(client) if is_langsmith_enabled(settings) else client
 
     @property

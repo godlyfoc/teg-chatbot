@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef } from "react";
 import { useChatI18n } from "@/hooks/useChatI18n";
 import { useAssistantStatus } from "@/hooks/useAssistantStatus";
 import { useChat } from "@/hooks/useChat";
+import BulbMark from "./BulbMark";
 import ChatInput from "./ChatInput";
 import { IconChevronDown, IconSparkles, IconTrash } from "./ChatIcons";
 import MessageBubble from "./MessageBubble";
@@ -68,23 +69,13 @@ export default function ChatPanel({ onClose }: Props) {
         </div>
       </header>
 
-      <div className="chat-panel__messages">
+      <div className={`chat-panel__messages${showWelcome ? " chat-panel__messages--empty" : ""}`}>
         {showWelcome && (
           <div className="welcome">
+            <span className="welcome__icon">
+              <BulbMark />
+            </span>
             <p>{t.welcome}</p>
-            <div className="suggestions">
-              {t.suggestions.map((prompt) => (
-                <button
-                  key={prompt}
-                  type="button"
-                  className="suggestion"
-                  onClick={() => sendMessage(prompt)}
-                  disabled={isLoading}
-                >
-                  {prompt}
-                </button>
-              ))}
-            </div>
           </div>
         )}
 

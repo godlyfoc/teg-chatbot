@@ -11,7 +11,7 @@ const DEFAULT_LABELS: StatusLabels = {
 
 /**
  * Cycles through assistant status labels while waiting for a response.
- * Switches to "Generating response..." once streamed content arrives.
+ * Hides once streamed content starts arriving.
  */
 export function useAssistantStatus(
   isLoading: boolean,
@@ -27,7 +27,8 @@ export function useAssistantStatus(
     }
 
     if (hasStreamedContent) {
-      setStatusLabel(labels.generating);
+      // Streamed content is arriving — hide the loading indicator entirely.
+      setStatusLabel(null);
       return;
     }
 

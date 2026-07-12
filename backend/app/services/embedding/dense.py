@@ -27,7 +27,7 @@ class DenseEmbeddingClient:
     """Batch dense embedding client backed by OpenAI."""
 
     def __init__(self, api_key: str, model: str, batch_size: int = 64):
-        self.client = AsyncOpenAI(api_key=api_key)
+        self.client = AsyncOpenAI(api_key=api_key, timeout=20.0)
         self.model = model
         self.batch_size = batch_size
 

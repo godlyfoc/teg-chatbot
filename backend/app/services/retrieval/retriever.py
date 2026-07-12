@@ -93,6 +93,22 @@ class Retriever:
             model=self.settings.index_embedding_model,
             batch_size=1,
         )
+        self._store = _qdrant_store(self.settings)
+        self._store_ready = self._check_store_ready()
+
+    def _check_store_ready(self) -> bool:
+        settings = self.settings
+        try:
+            if not self._store.client.collection_exists(settings.qdrant_collection):
+                logger.warning("Qdrant collection %s does not exist", settings.qdrant_collection)
+                return False
+            if self._store.count_points() == 0:
+                logger.warning("Qdrant collection %s is empty", settings.qdrant_collection)
+                return False
+            return True
+        except Exception:
+            logger.exception("Qdrant readiness check failed — treating store as not ready")
+            return False
 
     async def retrieve(
         self,
@@ -107,15 +123,14 @@ class Retriever:
         if not settings.openai_api_key:
             raise ValueError("OPENAI_API_KEY is required for retrieval")
 
-        store = _qdrant_store(settings)
-        if not store.client.collection_exists(settings.qdrant_collection):
-            logger.warning("Qdrant collection %s does not exist", settings.qdrant_collection)
+        if not self._store_ready:
+            # Re-check rather than cache "not ready" forever — re-indexing can
+            # populate the collection while this long-lived instance is running.
+            self._store_ready = self._check_store_ready()
+        if not self._store_ready:
             return RetrievalResult(query=query, chunks=[], elapsed_seconds=0.0)
 
-        if store.count_points() == 0:
-            logger.warning("Qdrant collection %s is empty", settings.qdrant_collection)
-            return RetrievalResult(query=query, chunks=[], elapsed_seconds=0.0)
-
+        store = self._store
         dense_vectors = await self._dense_client.embed_texts([query])
         dense_vector = dense_vectors[0]
 

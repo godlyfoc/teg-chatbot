@@ -1,19 +1,22 @@
 """Chat API — health check and streaming chat."""
 
 import json
+from functools import lru_cache
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
-from app.config import Settings, get_settings
+from app.config import get_settings
 from app.models.chat import ChatRequest, HealthResponse
 from app.services.chat_service import ChatService
 
 router = APIRouter(prefix="/api", tags=["chat"])
 
 
-def get_chat_service(settings: Settings = Depends(get_settings)) -> ChatService:
-    return ChatService(settings)
+@lru_cache
+def get_chat_service() -> ChatService:
+    """Built once per process — reuses OpenAI/Cohere/Qdrant clients across requests."""
+    return ChatService(get_settings())
 
 
 @router.get("/health", response_model=HealthResponse)
